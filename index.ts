@@ -14,9 +14,15 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { diffLines, createTwoFilesPatch } from 'diff';
 import { minimatch } from 'minimatch';
+import fsSync from "fs";
+import { fileURLToPath } from 'url';
+
+// ES module-compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Tool config loading
-import toolConfigRaw from './tool-config.json' assert { type: 'json' };
+import toolConfigRaw from './tool-config.json' with { type: 'json' };
 
 // Command line argument parsing
 const args = process.argv.slice(2);
@@ -56,18 +62,30 @@ await Promise.all(args.map(async (dir) => {
   }
 }));
 
+// Utility to log errors to a file in the workspace root
+function logDebugError(message: string) {
+  try {
+    const logPath = path.join(process.cwd(), 'mcp-debug.log');
+    fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`);
+  } catch (e) {
+    // Ignore logging errors
+  }
+}
+
 // Security utilities
 async function validatePath(requestedPath: string): Promise<string> {
   const expandedPath = expandHome(requestedPath);
+  // Accept both absolute and relative paths, but require they resolve within allowed root
   const absolute = path.isAbsolute(expandedPath)
-    ? path.resolve(expandedPath)
-    : path.resolve(process.cwd(), expandedPath);
+    ? path.normalize(expandedPath)
+    : path.resolve(allowedDirectories[0], expandedPath);
 
   const normalizedRequested = normalizePath(absolute);
 
   // Check if path is within allowed directories
   const isAllowed = allowedDirectories.some(dir => normalizedRequested.startsWith(dir));
   if (!isAllowed) {
+    logDebugError(`validatePath: DENIED: requestedPath='${requestedPath}', expandedPath='${expandedPath}', absolute='${absolute}', normalizedRequested='${normalizedRequested}', allowedDirectories='${allowedDirectories.join(', ')}'`);
     throw new Error(`Access denied - path outside allowed directories: ${absolute} not in ${allowedDirectories.join(', ')}`);
   }
 
@@ -77,6 +95,7 @@ async function validatePath(requestedPath: string): Promise<string> {
     const normalizedReal = normalizePath(realPath);
     const isRealPathAllowed = allowedDirectories.some(dir => normalizedReal.startsWith(dir));
     if (!isRealPathAllowed) {
+      logDebugError(`validatePath: DENIED (symlink): requestedPath='${requestedPath}', realPath='${realPath}', normalizedReal='${normalizedReal}', allowedDirectories='${allowedDirectories.join(', ')}'`);
       throw new Error("Access denied - symlink target outside allowed directories");
     }
     return realPath;
@@ -88,10 +107,12 @@ async function validatePath(requestedPath: string): Promise<string> {
       const normalizedParent = normalizePath(realParentPath);
       const isParentAllowed = allowedDirectories.some(dir => normalizedParent.startsWith(dir));
       if (!isParentAllowed) {
+        logDebugError(`validatePath: DENIED (parent): requestedPath='${requestedPath}', parentDir='${parentDir}', realParentPath='${realParentPath}', normalizedParent='${normalizedParent}', allowedDirectories='${allowedDirectories.join(', ')}'`);
         throw new Error("Access denied - parent directory outside allowed directories");
       }
       return absolute;
     } catch {
+      logDebugError(`validatePath: DENIED (parent missing): requestedPath='${requestedPath}', parentDir='${parentDir}'`);
       throw new Error(`Parent directory does not exist: ${parentDir}`);
     }
   }
@@ -352,6 +373,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // Check if tool is enabled
   const config = toolConfigRaw;
   if (config[request.params.name]?.enabled === false) {
+    logDebugError(`Tool '${request.params.name}' is disabled by server configuration.`);
     return {
       content: [{ type: "text", text: `Error: Tool '${request.params.name}' is disabled by server configuration.` }],
       isError: true,
@@ -543,6 +565,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logDebugError(`Tool handler error: ${errorMessage}, request: ${JSON.stringify(request)}`);
     return {
       content: [{ type: "text", text: `Error: ${errorMessage}` }],
       isError: true,
@@ -556,6 +579,11 @@ async function runServer() {
   await server.connect(transport);
   console.error("Secure MCP Filesystem Server running on stdio");
   console.error("Allowed directories:", allowedDirectories);
+
+  // Print debug info at startup
+  console.error(`[MCP DEBUG] __dirname: ${__dirname}`);
+  console.error(`[MCP DEBUG] process.cwd(): ${process.cwd()}`);
+  console.error(`[MCP DEBUG] log path: ${path.join(process.cwd(), 'mcp-debug.log')}`);
 }
 
 runServer().catch((error) => {
