@@ -19,7 +19,7 @@
   },
   "write_file": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
@@ -28,7 +28,7 @@
   },
   "edit_file": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -51,7 +51,7 @@
   },
   "create_directory": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -78,7 +78,7 @@
   },
   "move_file": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "source": { "type": "string" }, "destination": { "type": "string" } },
