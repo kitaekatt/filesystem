@@ -69,7 +69,7 @@
   },
   "directory_tree": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. Call directory_tree on your workspace root instead of verifying the existence of individual files and directories.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
