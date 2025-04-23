@@ -9,10 +9,47 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
 - Move files/directories
 - Search files
 - Get file metadata
+- **NEW:** Disable specific tools via `tool-config.json`
 
 **Note**: The server will only allow operations within directories specified via `args`.
 
 ## API
+
+### Tool Configuration (UPDATED)
+
+All tool metadata is now configured in the `tool-config.json` file in the server root. For each tool, you can set:
+- `enabled`: Whether the tool is available (default: `true`).
+- `description`: The description shown to agents/clients.
+- `inputSchema`: The input schema (JSON Schema) for the tool's arguments.
+
+To disable a tool, set its `enabled` value to `false`. Disabled tools will not be exposed or callable.
+To change a tool's description or input schema, edit the corresponding fields in `tool-config.json`.
+
+Example `tool-config.json`:
+```json
+{
+  "read_file": {
+    "enabled": true,
+    "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "path": { "type": "string" } },
+      "required": ["path"]
+    }
+  },
+  "write_file": {
+    "enabled": false,
+    "description": "Create a new file or completely overwrite an existing file with new content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
+      "required": ["path", "content"]
+    }
+  }
+}
+```
+
+**Note:** You must restart the server after editing `tool-config.json` for changes to take effect.
 
 ### Resources
 
