@@ -6,9 +6,15 @@ import fs from "fs/promises";
 import path from "path";
 import os from 'os';
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { createTwoFilesPatch } from 'diff';
 import { minimatch } from 'minimatch';
+import fsSync from "fs";
+import { fileURLToPath } from 'url';
+// ES module-compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Tool config loading
+import toolConfigRaw from './tool-config.json' with { type: 'json' };
 // Command line argument parsing
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -24,6 +30,20 @@ function expandHome(filepath) {
         return path.join(os.homedir(), filepath.slice(1));
     }
     return filepath;
+}
+function normalizeInputPath(input) {
+    // Handle Unix-style Windows absolute paths like /c:/foo/bar
+    const winDriveMatch = input.match(/^\/([a-zA-Z]):[\/]/);
+    if (winDriveMatch) {
+        // Convert /c:/foo/bar to C:/foo/bar
+        return input.replace(/^\/(.)\:/, (m, d) => `${d.toUpperCase()}:`);
+    }
+    // On Windows, also handle forward slashes in C:/foo/bar
+    if (process.platform === 'win32' && input.match(/^[a-zA-Z]:\//)) {
+        return input.replace(/\//g, '\\');
+    }
+    // Otherwise, return as-is
+    return input;
 }
 // Store allowed directories in normalized form
 const allowedDirectories = args.map(dir => normalizePath(path.resolve(expandHome(dir))));
@@ -41,16 +61,29 @@ await Promise.all(args.map(async (dir) => {
         process.exit(1);
     }
 }));
+// Utility to log errors to a file in the workspace root
+function logDebugError(message) {
+    try {
+        const logPath = path.join(process.cwd(), 'mcp-debug.log');
+        fsSync.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`);
+    }
+    catch (e) {
+        // Ignore logging errors
+    }
+}
 // Security utilities
 async function validatePath(requestedPath) {
     const expandedPath = expandHome(requestedPath);
-    const absolute = path.isAbsolute(expandedPath)
-        ? path.resolve(expandedPath)
-        : path.resolve(process.cwd(), expandedPath);
+    const normalizedInput = normalizeInputPath(expandedPath);
+    // Accept both absolute and relative paths, but require they resolve within allowed root
+    const absolute = path.isAbsolute(normalizedInput)
+        ? path.normalize(normalizedInput)
+        : path.resolve(allowedDirectories[0], normalizedInput);
     const normalizedRequested = normalizePath(absolute);
     // Check if path is within allowed directories
     const isAllowed = allowedDirectories.some(dir => normalizedRequested.startsWith(dir));
     if (!isAllowed) {
+        logDebugError(`validatePath: DENIED: requestedPath='${requestedPath}', expandedPath='${expandedPath}', absolute='${absolute}', normalizedRequested='${normalizedRequested}', allowedDirectories='${allowedDirectories.join(', ')}'`);
         throw new Error(`Access denied - path outside allowed directories: ${absolute} not in ${allowedDirectories.join(', ')}`);
     }
     // Handle symlinks by checking their real path
@@ -59,6 +92,7 @@ async function validatePath(requestedPath) {
         const normalizedReal = normalizePath(realPath);
         const isRealPathAllowed = allowedDirectories.some(dir => normalizedReal.startsWith(dir));
         if (!isRealPathAllowed) {
+            logDebugError(`validatePath: DENIED (symlink): requestedPath='${requestedPath}', realPath='${realPath}', normalizedReal='${normalizedReal}', allowedDirectories='${allowedDirectories.join(', ')}'`);
             throw new Error("Access denied - symlink target outside allowed directories");
         }
         return realPath;
@@ -71,11 +105,13 @@ async function validatePath(requestedPath) {
             const normalizedParent = normalizePath(realParentPath);
             const isParentAllowed = allowedDirectories.some(dir => normalizedParent.startsWith(dir));
             if (!isParentAllowed) {
+                logDebugError(`validatePath: DENIED (parent): requestedPath='${requestedPath}', parentDir='${parentDir}', realParentPath='${realParentPath}', normalizedParent='${normalizedParent}', allowedDirectories='${allowedDirectories.join(', ')}'`);
                 throw new Error("Access denied - parent directory outside allowed directories");
             }
             return absolute;
         }
         catch {
+            logDebugError(`validatePath: DENIED (parent missing): requestedPath='${requestedPath}', parentDir='${parentDir}'`);
             throw new Error(`Parent directory does not exist: ${parentDir}`);
         }
     }
@@ -252,102 +288,27 @@ async function applyFileEdits(filePath, edits, dryRun = false) {
 }
 // Tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-        tools: [
-            {
-                name: "read_file",
-                description: "Read the complete contents of a file from the file system. " +
-                    "Handles various text encodings and provides detailed error messages " +
-                    "if the file cannot be read. Use this tool when you need to examine " +
-                    "the contents of a single file. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(ReadFileArgsSchema),
-            },
-            {
-                name: "read_multiple_files",
-                description: "Read the contents of multiple files simultaneously. This is more " +
-                    "efficient than reading files one by one when you need to analyze " +
-                    "or compare multiple files. Each file's content is returned with its " +
-                    "path as a reference. Failed reads for individual files won't stop " +
-                    "the entire operation. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(ReadMultipleFilesArgsSchema),
-            },
-            {
-                name: "write_file",
-                description: "Create a new file or completely overwrite an existing file with new content. " +
-                    "Use with caution as it will overwrite existing files without warning. " +
-                    "Handles text content with proper encoding. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(WriteFileArgsSchema),
-            },
-            {
-                name: "edit_file",
-                description: "Make line-based edits to a text file. Each edit replaces exact line sequences " +
-                    "with new content. Returns a git-style diff showing the changes made. " +
-                    "Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(EditFileArgsSchema),
-            },
-            {
-                name: "create_directory",
-                description: "Create a new directory or ensure a directory exists. Can create multiple " +
-                    "nested directories in one operation. If the directory already exists, " +
-                    "this operation will succeed silently. Perfect for setting up directory " +
-                    "structures for projects or ensuring required paths exist. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(CreateDirectoryArgsSchema),
-            },
-            {
-                name: "list_directory",
-                description: "Get a detailed listing of all files and directories in a specified path. " +
-                    "Results clearly distinguish between files and directories with [FILE] and [DIR] " +
-                    "prefixes. This tool is essential for understanding directory structure and " +
-                    "finding specific files within a directory. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(ListDirectoryArgsSchema),
-            },
-            {
-                name: "directory_tree",
-                description: "Get a recursive tree view of files and directories as a JSON structure. " +
-                    "Each entry includes 'name', 'type' (file/directory), and 'children' for directories. " +
-                    "Files have no children array, while directories always have a children array (which may be empty). " +
-                    "The output is formatted with 2-space indentation for readability. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(DirectoryTreeArgsSchema),
-            },
-            {
-                name: "move_file",
-                description: "Move or rename files and directories. Can move files between directories " +
-                    "and rename them in a single operation. If the destination exists, the " +
-                    "operation will fail. Works across different directories and can be used " +
-                    "for simple renaming within the same directory. Both source and destination must be within allowed directories.",
-                inputSchema: zodToJsonSchema(MoveFileArgsSchema),
-            },
-            {
-                name: "search_files",
-                description: "Recursively search for files and directories matching a pattern. " +
-                    "Searches through all subdirectories from the starting path. The search " +
-                    "is case-insensitive and matches partial names. Returns full paths to all " +
-                    "matching items. Great for finding files when you don't know their exact location. " +
-                    "Only searches within allowed directories.",
-                inputSchema: zodToJsonSchema(SearchFilesArgsSchema),
-            },
-            {
-                name: "get_file_info",
-                description: "Retrieve detailed metadata about a file or directory. Returns comprehensive " +
-                    "information including size, creation time, last modified time, permissions, " +
-                    "and type. This tool is perfect for understanding file characteristics " +
-                    "without reading the actual content. Only works within allowed directories.",
-                inputSchema: zodToJsonSchema(GetFileInfoArgsSchema),
-            },
-            {
-                name: "list_allowed_directories",
-                description: "Returns the list of directories that this server is allowed to access. " +
-                    "Use this to understand which directories are available before trying to access files.",
-                inputSchema: {
-                    type: "object",
-                    properties: {},
-                    required: [],
-                },
-            },
-        ],
-    };
+    // Use tool-config.json for all tool metadata
+    const config = toolConfigRaw;
+    const enabledTools = Object.entries(config)
+        .filter(([_, tool]) => tool.enabled !== false)
+        .map(([name, tool]) => ({
+        name,
+        description: tool.description,
+        inputSchema: tool.inputSchema
+    }));
+    return { tools: enabledTools };
 });
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // Check if tool is enabled
+    const config = toolConfigRaw;
+    if (config[request.params.name]?.enabled === false) {
+        logDebugError(`Tool '${request.params.name}' is disabled by server configuration.`);
+        return {
+            content: [{ type: "text", text: `Error: Tool '${request.params.name}' is disabled by server configuration.` }],
+            isError: true,
+        };
+    }
     try {
         const { name, arguments: args } = request.params;
         switch (name) {
@@ -509,6 +470,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        logDebugError(`Tool handler error: ${errorMessage}, request: ${JSON.stringify(request)}`);
         return {
             content: [{ type: "text", text: `Error: ${errorMessage}` }],
             isError: true,
@@ -521,6 +483,10 @@ async function runServer() {
     await server.connect(transport);
     console.error("Secure MCP Filesystem Server running on stdio");
     console.error("Allowed directories:", allowedDirectories);
+    // Print debug info at startup
+    console.error(`[MCP DEBUG] __dirname: ${__dirname}`);
+    console.error(`[MCP DEBUG] process.cwd(): ${process.cwd()}`);
+    console.error(`[MCP DEBUG] log path: ${path.join(process.cwd(), 'mcp-debug.log')}`);
 }
 runServer().catch((error) => {
     console.error("Fatal error running server:", error);

@@ -3,7 +3,9 @@
     "outDir": "./dist",
     "rootDir": ".",
     "moduleResolution": "NodeNext",
-    "module": "NodeNext"
+    "module": "NodeNext",
+    "resolveJsonModule": true,
+    "esModuleInterop": true
   },
   "include": [
     "./**/*.ts"

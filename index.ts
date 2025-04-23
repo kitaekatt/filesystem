@@ -43,6 +43,21 @@ function expandHome(filepath: string): string {
   return filepath;
 }
 
+function normalizeInputPath(input: string): string {
+  // Handle Unix-style Windows absolute paths like /c:/foo/bar
+  const winDriveMatch = input.match(/^\/([a-zA-Z]):[\/]/);
+  if (winDriveMatch) {
+    // Convert /c:/foo/bar to C:/foo/bar
+    return input.replace(/^\/(.)\:/, (m, d) => `${d.toUpperCase()}:`);
+  }
+  // On Windows, also handle forward slashes in C:/foo/bar
+  if (process.platform === 'win32' && input.match(/^[a-zA-Z]:\//)) {
+    return input.replace(/\//g, '\\');
+  }
+  // Otherwise, return as-is
+  return input;
+}
+
 // Store allowed directories in normalized form
 const allowedDirectories = args.map(dir =>
   normalizePath(path.resolve(expandHome(dir)))
@@ -75,10 +90,11 @@ function logDebugError(message: string) {
 // Security utilities
 async function validatePath(requestedPath: string): Promise<string> {
   const expandedPath = expandHome(requestedPath);
+  const normalizedInput = normalizeInputPath(expandedPath);
   // Accept both absolute and relative paths, but require they resolve within allowed root
-  const absolute = path.isAbsolute(expandedPath)
-    ? path.normalize(expandedPath)
-    : path.resolve(allowedDirectories[0], expandedPath);
+  const absolute = path.isAbsolute(normalizedInput)
+    ? path.normalize(normalizedInput)
+    : path.resolve(allowedDirectories[0], normalizedInput);
 
   const normalizedRequested = normalizePath(absolute);
 
