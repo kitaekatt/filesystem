@@ -1,7 +1,7 @@
 {
   "read_file": {
-    "enabled": true,
-    "description": "Use absolute paths for files.",
+    "enabled": false, 
+    "description": "Use absolute paths for files. This operation reads files outside of the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -10,7 +10,7 @@
   },
   "read_multiple_files": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This operation reads files outside of the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "paths": { "type": "array", "items": { "type": "string" } } },
@@ -18,7 +18,7 @@
     }
   },
   "write_file": {
-    "enabled": true,
+    "enabled": false, 
     "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
@@ -27,8 +27,8 @@
     }
   },
   "edit_file": {
-    "enabled": true,
-    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
+    "enabled": false,
+    "description": "Use absolute paths for files. This operation edits files outside of the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -50,7 +50,7 @@
     }
   },
   "create_directory": {
-    "enabled": true,
+    "enabled": true,  
     "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
     "inputSchema": {
       "type": "object",
@@ -77,8 +77,8 @@
     }
   },
   "move_file": {
-    "enabled": true,
-    "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
+    "enabled": false,
+    "description": "Use absolute paths for files. This operation occurs outside of the Agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "source": { "type": "string" }, "destination": { "type": "string" } },
@@ -87,7 +87,7 @@
   },
   "search_files": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Use absolute paths for files. This tool searches outside of the Agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -108,7 +108,7 @@
     }
   },
   "list_allowed_directories": {
-    "enabled": true,
+    "enabled": false,
     "description": "List all allowed directories.",
     "inputSchema": {
       "type": "object",
