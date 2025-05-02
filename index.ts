@@ -43,24 +43,10 @@ function expandHome(filepath: string): string {
   return filepath;
 }
 
-function normalizeInputPath(input: string): string {
-  // Handle Unix-style Windows absolute paths like /c:/foo/bar
-  const winDriveMatch = input.match(/^\/([a-zA-Z]):[\/]/);
-  if (winDriveMatch) {
-    // Convert /c:/foo/bar to C:/foo/bar
-    return input.replace(/^\/(.)\:/, (m, d) => `${d.toUpperCase()}:`);
-  }
-  // On Windows, also handle forward slashes in C:/foo/bar
-  if (process.platform === 'win32' && input.match(/^[a-zA-Z]:\//)) {
-    return input.replace(/\//g, '\\');
-  }
-  // Otherwise, return as-is
-  return input;
-}
-
 // Store allowed directories in normalized form
+// Resolve and normalize immediately for consistent comparisons later
 const allowedDirectories = args.map(dir =>
-  normalizePath(path.resolve(expandHome(dir)))
+  path.normalize(path.resolve(expandHome(dir)))
 );
 
 // Validate that all directories exist and are accessible
@@ -90,46 +76,128 @@ function logDebugError(message: string) {
 // Security utilities
 async function validatePath(requestedPath: string): Promise<string> {
   const expandedPath = expandHome(requestedPath);
-  const normalizedInput = normalizeInputPath(expandedPath);
-  // Accept both absolute and relative paths, but require they resolve within allowed root
-  const absolute = path.isAbsolute(normalizedInput)
-    ? path.normalize(normalizedInput)
-    : path.resolve(allowedDirectories[0], normalizedInput);
 
-  const normalizedRequested = normalizePath(absolute);
+  // Resolve the path to an absolute path based on the server's CWD if relative.
+  // Normalize the path for the current OS (e.g., slashes, drive letter).
+  const resolvedPath = path.normalize(path.resolve(expandedPath));
 
-  // Check if path is within allowed directories
-  const isAllowed = allowedDirectories.some(dir => normalizedRequested.startsWith(dir));
-  if (!isAllowed) {
-    logDebugError(`validatePath: DENIED: requestedPath='${requestedPath}', expandedPath='${expandedPath}', absolute='${absolute}', normalizedRequested='${normalizedRequested}', allowedDirectories='${allowedDirectories.join(', ')}'`);
-    throw new Error(`Access denied - path outside allowed directories: ${absolute} not in ${allowedDirectories.join(', ')}`);
+  // Check if the resolved path is within any of the allowed directories.
+  let isAllowed = false;
+  let containingDir: string | undefined = undefined;
+
+  for (const allowedDir of allowedDirectories) {
+    // Ensure comparison consistency, especially on case-insensitive systems like Windows
+    const normalizedAllowedDir = path.normalize(allowedDir);
+
+    // Check if the resolved path starts with the allowed directory path.
+    // Add path.sep to ensure it's a directory match, not just a prefix match
+    // (e.g., /allowed/foo should not match /allowed-other/bar).
+    // On Windows, path.relative handles case-insensitivity.
+    if (process.platform === 'win32') {
+        const relative = path.relative(normalizedAllowedDir, resolvedPath);
+        // If relative path doesn't start with '..' and isn't just '.' (or empty),
+        // it's inside or equal to the allowed directory.
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+            isAllowed = true;
+            containingDir = normalizedAllowedDir;
+            break;
+        } else if (relative === '') { // Paths are identical
+            isAllowed = true;
+            containingDir = normalizedAllowedDir;
+            break;
+        }
+    } else {
+        // On case-sensitive systems (Linux, macOS)
+        if (resolvedPath.startsWith(normalizedAllowedDir + path.sep) || resolvedPath === normalizedAllowedDir) {
+            isAllowed = true;
+            containingDir = normalizedAllowedDir;
+            break;
+        }
+    }
   }
 
-  // Handle symlinks by checking their real path
+
+  if (!isAllowed) {
+    logDebugError(`validatePath: DENIED: requestedPath='${requestedPath}', expandedPath='${expandedPath}', resolvedPath='${resolvedPath}', allowedDirectories='${allowedDirectories.join(', ')}'`);
+    throw new Error(`Access denied - path outside allowed directories: ${resolvedPath} not in ${allowedDirectories.join(', ')}`);
+  }
+
+  // Handle symlinks by checking their real path against the *containing* allowed directory
+  // This is important because the real path might resolve *outside* the originally matched allowedDir
+  // but still be within *another* allowedDir. We re-validate against all allowed dirs.
   try {
-    const realPath = await fs.realpath(absolute);
-    const normalizedReal = normalizePath(realPath);
-    const isRealPathAllowed = allowedDirectories.some(dir => normalizedReal.startsWith(dir));
+    // Use fs.promises.realpath for async operation
+    const realPath = await fs.realpath(resolvedPath);
+    const normalizedRealPath = path.normalize(realPath);
+
+    let isRealPathAllowed = false;
+    for (const allowedDir of allowedDirectories) {
+        const normalizedAllowedDir = path.normalize(allowedDir);
+        if (process.platform === 'win32') {
+            const relative = path.relative(normalizedAllowedDir, normalizedRealPath);
+            if ((relative && !relative.startsWith('..') && !path.isAbsolute(relative)) || relative === '') {
+                 isRealPathAllowed = true;
+                 break;
+            }
+        } else {
+            if (normalizedRealPath.startsWith(normalizedAllowedDir + path.sep) || normalizedRealPath === normalizedAllowedDir) {
+                isRealPathAllowed = true;
+                break;
+            }
+        }
+    }
+
+
     if (!isRealPathAllowed) {
-      logDebugError(`validatePath: DENIED (symlink): requestedPath='${requestedPath}', realPath='${realPath}', normalizedReal='${normalizedReal}', allowedDirectories='${allowedDirectories.join(', ')}'`);
+      logDebugError(`validatePath: DENIED (symlink): requestedPath='${requestedPath}', realPath='${realPath}', normalizedRealPath='${normalizedRealPath}', allowedDirectories='${allowedDirectories.join(', ')}'`);
       throw new Error("Access denied - symlink target outside allowed directories");
     }
-    return realPath;
-  } catch (error) {
-    // For new files that don't exist yet, verify parent directory
-    const parentDir = path.dirname(absolute);
-    try {
-      const realParentPath = await fs.realpath(parentDir);
-      const normalizedParent = normalizePath(realParentPath);
-      const isParentAllowed = allowedDirectories.some(dir => normalizedParent.startsWith(dir));
-      if (!isParentAllowed) {
-        logDebugError(`validatePath: DENIED (parent): requestedPath='${requestedPath}', parentDir='${parentDir}', realParentPath='${realParentPath}', normalizedParent='${normalizedParent}', allowedDirectories='${allowedDirectories.join(', ')}'`);
-        throw new Error("Access denied - parent directory outside allowed directories");
-      }
-      return absolute;
-    } catch {
-      logDebugError(`validatePath: DENIED (parent missing): requestedPath='${requestedPath}', parentDir='${parentDir}'`);
-      throw new Error(`Parent directory does not exist: ${parentDir}`);
+    // Return the *real* path if it's valid and exists
+    return normalizedRealPath;
+
+  } catch (error: any) {
+    // If realpath fails (e.g., file doesn't exist), check the parent directory's realpath.
+    // This is necessary for operations like 'write_file' or 'create_directory' where the target might not exist yet.
+    if (error.code === 'ENOENT') { // Only proceed if the error is "No such file or directory"
+        const parentDir = path.dirname(resolvedPath);
+        try {
+            const realParentPath = await fs.realpath(parentDir);
+            const normalizedRealParent = path.normalize(realParentPath);
+
+            let isParentAllowed = false;
+             for (const allowedDir of allowedDirectories) {
+                const normalizedAllowedDir = path.normalize(allowedDir);
+                 if (process.platform === 'win32') {
+                    const relative = path.relative(normalizedAllowedDir, normalizedRealParent);
+                     if ((relative && !relative.startsWith('..') && !path.isAbsolute(relative)) || relative === '') {
+                         isParentAllowed = true;
+                         break;
+                     }
+                 } else {
+                    if (normalizedRealParent.startsWith(normalizedAllowedDir + path.sep) || normalizedRealParent === normalizedAllowedDir) {
+                        isParentAllowed = true;
+                        break;
+                    }
+                 }
+             }
+
+            if (!isParentAllowed) {
+                logDebugError(`validatePath: DENIED (parent symlink): requestedPath='${requestedPath}', parentDir='${parentDir}', realParentPath='${realParentPath}', normalizedRealParent='${normalizedRealParent}', allowedDirectories='${allowedDirectories.join(', ')}'`);
+                throw new Error("Access denied - parent directory's real path is outside allowed directories");
+            }
+            // If parent is allowed, return the originally resolved (non-real) path,
+            // as the target itself doesn't exist yet.
+            return resolvedPath;
+        } catch (parentError: any) {
+             logDebugError(`validatePath: DENIED (parent realpath failed): requestedPath='${requestedPath}', parentDir='${parentDir}', Error: ${parentError.message}`);
+             // If the parent directory *also* doesn't exist or can't be accessed
+             throw new Error(`Cannot validate path: Parent directory check failed for ${parentDir}. Error: ${parentError.message}`);
+        }
+
+    } else {
+        // Re-throw unexpected errors from fs.realpath
+        logDebugError(`validatePath: DENIED (realpath unexpected error): requestedPath='${requestedPath}', Error: ${error.message}`);
+        throw new Error(`Failed to validate path existence: ${error.message}`);
     }
   }
 }

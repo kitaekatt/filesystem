@@ -1,7 +1,8 @@
 {
   "read_file": {
-    "enabled": false, 
+    "enabled": true, 
     "description": "Use absolute paths for files. This operation reads files outside of the agent's sandbox.",
+    "cursor-notes": "Recommend disabling as cursor's read_file tool works within the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -11,6 +12,7 @@
   "read_multiple_files": {
     "enabled": true,
     "description": "Use absolute paths for files. This operation reads files outside of the agent's sandbox.",
+    "cursor-notes": "Direct the AI to use the read_multiple_files tool to read a list of files to efficiently gather context",
     "inputSchema": {
       "type": "object",
       "properties": { "paths": { "type": "array", "items": { "type": "string" } } },
@@ -18,8 +20,9 @@
     }
   },
   "write_file": {
-    "enabled": false, 
+    "enabled": true, 
     "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
+    "cursor-notes": "Disabled by default as this bypasses the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
@@ -27,8 +30,9 @@
     }
   },
   "edit_file": {
-    "enabled": false,
+    "enabled": true,
     "description": "Use absolute paths for files. This operation edits files outside of the agent's sandbox.",
+    "cursor-notes": "Disabled by default as this bypasses the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -52,6 +56,7 @@
   "create_directory": {
     "enabled": true,  
     "description": "Use absolute paths for files. This operation occurs outside of Cursor's sandbox.",
+    "cursor-notes": "Enabled to reduce shell calls, but agent can do this via terminal",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -59,8 +64,9 @@
     }
   },
   "list_directory": {
-    "enabled": true,
+    "enabled": false,
     "description": "Use absolute paths for files.",
+    "cursor-notes": "Disabled by default to encourage use of the directory tree",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -69,7 +75,8 @@
   },
   "directory_tree": {
     "enabled": true,
-    "description": "Use absolute paths for files. Call directory_tree on your workspace root instead of verifying the existence of individual files and directories.",
+    "description": "Use absolute paths. Use this tool to list directory contents, verify file and directory existance.",
+    "cursor-notes": "A single call to the root of the workspace should make the AI fully aware of the directory structure",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -79,6 +86,7 @@
   "move_file": {
     "enabled": false,
     "description": "Use absolute paths for files. This operation occurs outside of the Agent's sandbox.",
+    "cursor-notes": "Disabled as this bypasses the agent's sandbox.",
     "inputSchema": {
       "type": "object",
       "properties": { "source": { "type": "string" }, "destination": { "type": "string" } },
@@ -88,6 +96,7 @@
   "search_files": {
     "enabled": true,
     "description": "Use absolute paths for files. This tool searches outside of the Agent's sandbox.",
+    "cursor-notes": "The agent can effectively search with grep, leaving this enabled for now to evaluate its effectiveness",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -100,7 +109,8 @@
   },
   "get_file_info": {
     "enabled": true,
-    "description": "Use absolute paths for files.",
+    "description": "Prefer directory_tree tool for verifying file existance. Use absolute paths for files.",
+    "cursor-notes": "Leaving this tool eanbled for now but not sure if it is needed given directory_tree",
     "inputSchema": {
       "type": "object",
       "properties": { "path": { "type": "string" } },
@@ -110,6 +120,7 @@
   "list_allowed_directories": {
     "enabled": false,
     "description": "List all allowed directories.",
+    "cursor-notes": "This tool should likely be deprecated as it's a leftover from more general file server capabilities",
     "inputSchema": {
       "type": "object",
       "properties": {},
